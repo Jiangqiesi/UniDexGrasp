@@ -307,6 +307,29 @@ python ./network/train.py --config-name ipdf_config --exp-dir ./h20_ipdf_smoke \
 `network/train.py` 和 `network/eval.py` 已支持把额外的 `key=value` 参数透传给
 Hydra，所以这些临时覆盖项会生效。
 
+如果多卡命令已经出现 `[rank0]` / `[rank1]` 等日志，说明 DDP 已经拉起来了。
+例如下面这种报错不是多卡启动问题，而是 generation 数据缓存不完整：
+
+```text
+FileNotFoundError: ... data/DFCData/meshdatav3/.../pcs_table.npy
+```
+
+`ipdf_data.yaml` 默认从 `data/DFCData/meshdatav3` 读取每个物体的
+`poses.npy` 和 `pcs_table.npy`。`run_generation_h20_train.sh` 现在会在启动
+`torchrun` 前做一次单进程预检；如果缺 `pcs_table.npy`，先在服务器上生成缓存：
+
+```bash
+cd "$PROJECT_ROOT/dexgrasp_generation"
+source ../scripts/activate_uv_generation_h20.sh
+python scripts/generate_object_table_pc.py \
+  --data_root_path data/DFCData/meshdatav3 \
+  --gpu_list 4 5 6 7 \
+  --n_cpu 8
+```
+
+如果只是临时确认训练代码、想跳过预检，可以设置
+`SKIP_GENERATION_DATA_CHECK=1`，但真正训练仍需要这些文件存在。
+
 ## 5. 安装 policy 环境
 
 Policy 是 Isaac Gym 栈，优先保持仓库当前的 `torch==1.13.1+cu117`，再用
