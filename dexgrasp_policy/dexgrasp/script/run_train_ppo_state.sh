@@ -1,11 +1,5 @@
-CUDA_VISIBLE_DEVICES=0 \
-python train.py \
---task=ShadowHandGrasp \
---algo=ppo \
---seed=0 \
---rl_device=cuda:0 \
---sim_device=cuda:0 \
---logdir=logs/test \
---headless \
---model_dir=example_model/model.pt \
-#--test
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+exec "$ROOT_DIR/scripts/run_policy_state_train.sh" "$@"

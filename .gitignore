@@ -104,6 +104,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.venvs/
 env/
 venv/
 ENV/
@@ -151,3 +152,7 @@ runs
 eval/
 
 runs_old
+
+# large thirdparty / trained models
+dexgrasp_policy/thirdparty/
+dexgrasp_generation/ipdf_train/

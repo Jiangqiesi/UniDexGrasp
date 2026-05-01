@@ -174,14 +174,13 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config-name", type=str, default="eval_config")
     parser.add_argument("--exp-dir", type=str, help="E.g., './eval_result'.")
-    return parser.parse_args()
+    return parser.parse_known_args()
 
 
 if __name__ == "__main__":
-    args = parse_args()
+    args, overrides = parse_args()
     initialize(version_base=None, config_path="../configs", job_name="train")
-    if args.exp_dir is None:
-        cfg = compose(config_name=args.config_name)
-    else:
-        cfg = compose(config_name=args.config_name, overrides=[f"exp_dir={args.exp_dir}"])
+    if args.exp_dir is not None:
+        overrides = [f"exp_dir={args.exp_dir}", *overrides]
+    cfg = compose(config_name=args.config_name, overrides=overrides)
     main(cfg)

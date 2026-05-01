@@ -4,7 +4,12 @@ Original source available at https://github.com/rusty1s/pytorch_geometric"""
 import torch
 import torch.nn.functional as F
 from torch.nn import Sequential as Seq, Linear as Lin, ReLU, BatchNorm1d as BN
-from torch_geometric.nn import PointConv, fps, radius, global_max_pool
+from torch_geometric.nn import fps, radius, global_max_pool
+
+try:
+    from torch_geometric.nn import PointConv
+except ImportError:
+    from torch_geometric.nn import PointNetConv as PointConv
 
 
 class SAModule(torch.nn.Module):

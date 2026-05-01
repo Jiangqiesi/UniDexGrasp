@@ -1,4 +1,5 @@
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 
 import os
 from os.path import join as pjoin
@@ -17,8 +18,25 @@ def get_dex_dataloader(cfg, mode="train", shuffle=None):
         shuffle = (mode == "train")
 
     dataset = DFCDataset(cfg, mode)
-    return DataLoader(dataset, batch_size=cfg["batch_size"], shuffle=shuffle, num_workers=cfg["num_workers"])
+    sampler = None
+    if cfg.get("distributed", False):
+        sampler = DistributedSampler(
+            dataset,
+            num_replicas=cfg["world_size"],
+            rank=cfg["rank"],
+            shuffle=shuffle,
+        )
+        shuffle = False
+    return DataLoader(dataset, batch_size=cfg["batch_size"], shuffle=shuffle, sampler=sampler, num_workers=cfg["num_workers"])
 
 def get_mesh_dataloader(cfg, mode="train"):
     dataset = Meshdata(cfg, mode)
-    return DataLoader(dataset, batch_size=cfg["batch_size"], shuffle=False, num_workers=cfg["num_workers"])
+    sampler = None
+    if cfg.get("distributed", False):
+        sampler = DistributedSampler(
+            dataset,
+            num_replicas=cfg["world_size"],
+            rank=cfg["rank"],
+            shuffle=False,
+        )
+    return DataLoader(dataset, batch_size=cfg["batch_size"], shuffle=False, sampler=sampler, num_workers=cfg["num_workers"])

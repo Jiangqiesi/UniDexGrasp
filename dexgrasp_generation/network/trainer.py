@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.init as init
+from torch.nn.parallel import DistributedDataParallel
 from torch.optim import lr_scheduler
 
 import math
@@ -17,6 +18,12 @@ sys.path.append(pjoin(base_dir, '..', '..'))
 
 from network.models.model import get_model, IPDFModel, GlowModel, ContactModel
 from utils.global_utils import update_dict
+
+def strip_parallel_prefix(state_dict):
+    clean_state_dict = OrderedDict()
+    for key, value in state_dict.items():
+        clean_state_dict[key.replace('net.module.', 'net.', 1)] = value
+    return clean_state_dict
 
 
 def weights_init(init_type='gaussian'):
@@ -102,6 +109,19 @@ class Trainer(nn.Module):
     def log_string(self, out_str):
         self.logger.info(out_str)
 
+    def enable_distributed(self):
+        if not self.cfg.get("distributed", False):
+            return
+
+        local_rank = int(self.cfg["local_rank"])
+        find_unused = bool(self.cfg.get("ddp_find_unused_parameters", False))
+        self.model.net = DistributedDataParallel(
+            self.model.net,
+            device_ids=[local_rank],
+            output_device=local_rank,
+            find_unused_parameters=find_unused,
+        )
+
     def step_epoch(self):
         self.epoch += 1
 
@@ -131,7 +151,7 @@ class Trainer(nn.Module):
             state_dict = torch.load(model_name, map_location=self.device)
             self.epoch = state_dict['epoch']
             self.iteration = state_dict['iteration']
-            ckpt.update(state_dict['model'])
+            ckpt.update(strip_parallel_prefix(state_dict['model']))
 
             if self.optimizer is not None:
                 try:
@@ -161,7 +181,8 @@ class Trainer(nn.Module):
                         nnew_ckpt[name[4:]] = new_ckpt[name]
                     self.model.net.load_state_dict(nnew_ckpt)
 
-        print(self.model)
+        if int(self.cfg.get("rank", 0)) == 0:
+            print(self.model)
 
         return self.epoch
 
@@ -173,7 +194,7 @@ class Trainer(nn.Module):
         state = {
             'epoch': epoch,
             'iteration': self.iteration,
-            'model': self.model.state_dict(),
+            'model': self.model.state_dict_for_save(),
             'optimizer': self.optimizer.state_dict()
         }
         torch.save(state, savepath)

@@ -19,6 +19,9 @@ from network.models.graspipdf.ipdf_network import IPDFFullNet
 from network.models.graspglow.glow_network import DexGlowNet
 from network.models.contactnet.contact_network import ContactMapNet
 
+def unwrap_parallel(module):
+    return module.module if hasattr(module, "module") else module
+
 def get_last_model(dirname, key=""):
     if not os.path.exists(dirname):
         return None
@@ -59,6 +62,16 @@ class BaseModel(nn.Module):
                 total_loss += loss_dict[key] * item
         loss_dict['total_loss'] = total_loss
         self.loss_dict = loss_dict
+
+    def net_module(self):
+        return unwrap_parallel(self.net)
+
+    def state_dict_for_save(self):
+        state_dict = self.state_dict()
+        clean_state_dict = OrderedDict()
+        for key, value in state_dict.items():
+            clean_state_dict[key.replace('net.module.', 'net.', 1)] = value
+        return clean_state_dict
 
     def update(self):
         self.pred_dict = self.net(self.feed_dict)
@@ -112,7 +125,7 @@ class IPDFModel(BaseModel):
         self.loss_dict = {}
         with torch.no_grad():
             self.pred_dict = self.net(self.feed_dict)
-            sampled_rotation = self.net.sample_rotations(self.feed_dict)  # [B, 3, 3]
+            sampled_rotation = self.net_module().sample_rotations(self.feed_dict)  # [B, 3, 3]
             self.pred_dict["sampled_rotation"] = sampled_rotation  # [B, 3, 3]
 
             if not no_eval:
@@ -170,7 +183,7 @@ class GlowModel(BaseModel):
         self.loss_dict = {}
         with torch.no_grad():
             self.pred_dict = self.net(self.feed_dict)
-            self.pred_dict.update(self.net.sample(self.feed_dict))
+            self.pred_dict.update(self.net_module().sample(self.feed_dict))
 
             if not no_eval:
                 self.compute_loss()

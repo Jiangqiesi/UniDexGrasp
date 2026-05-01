@@ -2,6 +2,8 @@ root_path: "data"
 # Comment the line below to train on all categories. (i.e., do not specify the categories)
 #categories: ["bottle"]
 dataset_dir: "DFCData"
+pose_data_dir: "DFCData/datasetv4.1"
+mesh_data_dir: "DFCData/meshdatav3"
 hand_global_trans: [0, -0.7, 0.2]
 hand_global_rotation_xyz: [-1.57, 0, 3.14]
 

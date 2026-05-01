@@ -17,8 +17,12 @@ import pytorch3d.ops
 class Meshdata(Dataset):
     def __init__(self, cfg, mode):
         self.mode = mode
-        self.data_root_path = os.path.join(cfg['dataset']['root_path'], 'DFCData', 'meshes')
-        self.splits_path = os.path.join(cfg['dataset']['root_path'], 'DFCData', 'splits')
+        dataset_cfg = cfg['dataset']
+        self.data_root_path = os.path.join(
+            dataset_cfg['root_path'],
+            dataset_cfg.get('mesh_data_dir', os.path.join(dataset_cfg['dataset_dir'], 'meshes'))
+        )
+        self.splits_path = os.path.join(dataset_cfg['root_path'], dataset_cfg['dataset_dir'], 'splits')
 
         self.object_code_list = []
         for splits_file_name in os.listdir(self.splits_path):
@@ -67,4 +71,3 @@ class Meshdata(Dataset):
             "scale": scale,
         }
         return ret_dict
-

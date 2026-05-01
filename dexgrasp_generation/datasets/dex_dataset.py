@@ -72,6 +72,14 @@ class DFCDataset(Dataset):
 
         self.root_path = dataset_cfg["root_path"]
         self.dataset_cfg = dataset_cfg
+        self.pose_data_dir = pjoin(
+            self.root_path,
+            dataset_cfg.get("pose_data_dir", pjoin(dataset_cfg["dataset_dir"], "poses"))
+        )
+        self.mesh_data_dir = pjoin(
+            self.root_path,
+            dataset_cfg.get("mesh_data_dir", pjoin(dataset_cfg["dataset_dir"], "meshes"))
+        )
         self.num_obj_points = dataset_cfg["num_obj_points"]
         self.num_hand_points = dataset_cfg["num_hand_points"]
         # if originally self.categories is None, it means we want all categories
@@ -123,10 +131,8 @@ class DFCDataset(Dataset):
         qpos = self.hand_builder.qpos_dict_to_qpos(qpos_dict)
 
         plane = recorded_data["plane"]
-        obj_pc_path = pjoin(self.root_path, "DFCData", "meshes",
-                            category, instance_no, "pcs_table.npy")
-        pose_path = pjoin(self.root_path, "DFCData", "meshes",
-                            category, instance_no, "poses.npy")
+        obj_pc_path = pjoin(self.mesh_data_dir, category, instance_no, "pcs_table.npy")
+        pose_path = pjoin(self.mesh_data_dir, category, instance_no, "poses.npy")
         pcs_table = torch.tensor(np.load(obj_pc_path, allow_pickle=True), dtype=torch.float)
         pose_matrices = torch.tensor(np.load(pose_path, allow_pickle=True), dtype=torch.float)
         index = (torch.tensor(plane[:3], dtype=torch.float) - pose_matrices[:, 2, :3]).norm(dim=1).argmin()
@@ -231,7 +237,7 @@ class DFCDataset(Dataset):
         for category in categories:
             for split in splits:
                 for instance in splits_data[category][split]:
-                    file_dir_path = pjoin(root_dir, self.dataset_cfg["dataset_dir"], "poses", category, instance)
+                    file_dir_path = pjoin(self.pose_data_dir, category, instance)
                     files = list(filter(lambda file: file[0] != "." and (file.endswith(".npz")),
                                         os.listdir(file_dir_path)))
                     files = list(map(lambda file: pjoin(file_dir_path, file),

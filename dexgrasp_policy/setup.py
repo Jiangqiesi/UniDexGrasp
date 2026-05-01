@@ -4,7 +4,7 @@ from __future__ import absolute_import
 from __future__ import print_function
 from __future__ import division
 
-from setuptools import setup, find_packages
+from setuptools import setup, find_namespace_packages
 
 import os
 
@@ -42,9 +42,9 @@ setup(
     description="Benchmark environments for Dexterous Grasping in NVIDIA IsaacGym.",
     keywords=["robotics", "rl"],
     include_package_data=True,
-    python_requires=">=3.6.*",
+    python_requires=">=3.6",
     install_requires=INSTALL_REQUIRES,
-    packages=find_packages("."),
+    packages=find_namespace_packages("."),
     classifiers=["Natural Language :: English", "Programming Language :: Python :: 3.8"],
     zip_safe=False,
 )
