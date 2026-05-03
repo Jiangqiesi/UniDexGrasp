@@ -102,12 +102,10 @@ export PATH="$HOME/.local/bin:$PATH"
 uv --version
 ```
 
-当前没有 CUDA 11.8，但有 CUDA 12.8。最快路线是先用 CUDA 12.8 编译本地
-CUDA 扩展，并用 `POINTNET2_SKIP_CUDA_VERSION_CHECK=1` 绕过 PyTorch 的严格
-CUDA 版本检查。CUDA 12.8 可以生成 H20/Hopper 需要的 `sm_90` 目标。
-
-如果后面 PointNet2 或 Isaac Gym 因 CUDA 12.8 与 `torch==1.13.1+cu117`
-混用失败，再考虑额外安装 CUDA 11.8 toolkit。
+当前没有 CUDA 11.8，但有 CUDA 12.8。H20 路线统一用 CUDA 12.8 编译本地
+CUDA 扩展，并设置 `TORCH_CUDA_ARCH_LIST=9.0+PTX` 生成 Hopper (`sm_90`) 目标。
+Policy 环境不要继续依赖 `torch==1.13.1+cu117` 做 GPU 计算；它只能看到 H20，
+但自身 CUDA kernel 不支持 `sm_90`。
 
 ## 2. 代码和数据
 
@@ -152,14 +150,9 @@ export TORCH_CUDA_ARCH_LIST="9.0+PTX"
 ```
 
 `TORCH_CUDA_ARCH_LIST="9.0+PTX"` 会让 nvcc 为 Hopper 架构 (`sm_90`) 生成优化
-代码。但 `torch==1.13.1+cu117` 的 `_get_cuda_arch_flags` 只认到 `8.6`，直接
-传 `9.0+PTX` 会报错。`setup_pointnet2_policy.sh` 内置了自动 patch 逻辑：检测到
-`TORCH_CUDA_ARCH_LIST` 含 `9.0` 时会先 patch `torch/utils/cpp_extension.py`，
-加入 `'9.0'` 支持。
-
-如果自动 patch 失败，脚本会自动降级为 `8.6+PTX`。PTX 向前兼容——CUDA 12.8 的
-nvcc 生成的 `compute_86` PTX 可以被 H20 驱动 JIT 编译到 `sm_90`。对 PointNet2
-这类基础 kernel 性能差异可忽略。
+代码。H20 专用脚本使用支持 `sm_90` 的 PyTorch 2.4.1 CUDA 12.x wheel；如果你在
+旧 `torch==1.13.1+cu117` 环境中设置这个变量，只能影响 PointNet2 这类本地扩展，
+不能让 PyTorch 自己支持 H20。
 
 ## 4. 安装 generation 环境
 
@@ -354,42 +347,67 @@ python scripts/generate_object_table_pc.py \
 
 ## 5. 安装 policy 环境
 
-Policy 是 Isaac Gym 栈，优先保持仓库当前的 `torch==1.13.1+cu117`，再用
-服务器现有 CUDA 12.8 toolkit 编译 PointNet2 给 H20。
+Policy 是 Isaac Gym 栈，但 H20 不能继续用仓库原版
+`torch==1.13.1+cu117` 做 CUDA 计算。这个 wheel 只能支持到 `sm_86`；
+在 H20 上会出现：
+
+```text
+NVIDIA H20 with CUDA capability sm_90 is not compatible with the current PyTorch installation.
+The current PyTorch install supports CUDA capabilities ... sm_86.
+```
+
+`TORCH_CUDA_ARCH_LIST=9.0+PTX` 只能影响本地编译的扩展，不能给已经安装好的
+PyTorch wheel 补上 `sm_90`。H20 policy 环境使用单独的 Python 3.8 venv、
+`torch==2.4.1` CUDA 12.4 wheel、Isaac Gym Preview 4，并在独立的
+`Pointnet2_PyTorch_h20` clone 里重编 PointNet2，避免覆盖旧 policy 环境的
+PointNet2 `.so`。
 
 ```bash
 cd "$PROJECT_ROOT"
 unset PYTHONPATH
 
-bash scripts/setup_uv_policy.sh
-bash scripts/setup_isaacgym.sh
-
 CUDA_HOME="$CUDA128_HOME" \
 TORCH_CUDA_ARCH_LIST="9.0+PTX" \
 POINTNET2_SKIP_CUDA_VERSION_CHECK=1 \
-bash scripts/setup_pointnet2_policy.sh
+bash scripts/setup_uv_policy_h20.sh
 ```
 
-这三个脚本都可以安全重复执行：
-- `setup_uv_policy.sh` — 复用已有 venv，跳过已安装的 torch 下载
-- `setup_isaacgym.sh` — 检查 tar.gz 是否存在、是否已解压，不重复下载
-- `setup_pointnet2_policy.sh` — 检查 git 仓库是否已 clone、pointnet2 是否已编译
+这个脚本可以安全重复执行：
+- `setup_uv_policy_h20.sh` — 复用 `.venvs/unidexgrasp-policy-h20`
+- 安装 `torch==2.4.1` / `torchvision==0.19.1` / `torchaudio==2.4.1`
+  from cu124 wheels
+- 安装 Isaac Gym Preview 4
+- Isaac Gym 的 `gymtorch.cpp` 已加 PyTorch 2.x 兼容分支，用 `torch::from_blob`
+  包装 Gym tensor
+- 在 `dexgrasp_policy/thirdparty/Pointnet2_PyTorch_h20` 中重编 PointNet2
 
 如果需要强制重建某个环境，设置 `FORCE_REINSTALL=1` 前缀执行对应脚本。
 
-验证 import。Isaac Gym 必须先 import，再 import torch：
+验证时不要只看 import；必须跑一个 PyTorch CUDA kernel 和一个 PointNet2 CUDA
+kernel。Isaac Gym 仍然先 import：
 
 ```bash
-source scripts/activate_uv_policy.sh
+source scripts/activate_uv_policy_h20.sh
 python - <<'PY'
 from isaacgym import gymapi
 import torch
+from isaacgym import gymtorch
 from pointnet2_ops import pointnet2_utils
+
 print("gym:", gymapi.acquire_gym())
 print("torch:", torch.__version__)
+print("torch cuda:", torch.version.cuda)
+print("arch list:", torch.cuda.get_arch_list())
 print("cuda available:", torch.cuda.is_available())
-if torch.cuda.is_available():
-    print("gpu:", torch.cuda.get_device_name(0))
+print("device count:", torch.cuda.device_count())
+print("gpu:", torch.cuda.get_device_name(0))
+print("capability:", torch.cuda.get_device_capability(0))
+x = torch.randn(256, 256, device="cuda")
+print("cuda matmul:", (x @ x).mean().item())
+points = torch.rand(2, 128, 3, device="cuda").contiguous()
+idx = pointnet2_utils.furthest_point_sample(points, 32)
+torch.cuda.synchronize()
+print("pointnet2 fps:", tuple(idx.shape), idx.device)
 print("pointnet2:", pointnet2_utils.__file__)
 PY
 ```
@@ -410,12 +428,17 @@ echo "$TORCH_CUDA_ARCH_LIST"
 
 ```bash
 cd "$PROJECT_ROOT"
-CUDA_VISIBLE_DEVICES=0 bash scripts/run_policy_state_smoke.sh
-CUDA_VISIBLE_DEVICES=0 bash scripts/run_policy_vision_smoke.sh
+POLICY_ACTIVATE_SCRIPT="$PWD/scripts/activate_uv_policy_h20.sh" \
+GPU_ID=0 \
+bash scripts/run_policy_state_smoke.sh
+
+POLICY_ACTIVATE_SCRIPT="$PWD/scripts/activate_uv_policy_h20.sh" \
+GPU_ID=0 \
+bash scripts/run_policy_vision_smoke.sh
 ```
 
 如果 smoke test 通过，再考虑多卡训练。当前脚本默认是单进程单卡，
-8 张 H20 不是自动并行；需要你自己按实验拆 `CUDA_VISIBLE_DEVICES` 或改训练脚本。
+8 张 H20 不是自动并行；需要你自己按实验拆 `GPU_ID` 或改训练脚本。
 
 ## 7. 常见失败和最快处理
 
@@ -428,43 +451,59 @@ python - <<'PY'
 import torch
 print(torch.__version__)
 print(torch.version.cuda)
+print(torch.cuda.get_arch_list())
 print(torch.cuda.get_device_name(0))
 print(torch.cuda.get_device_capability(0))
 PY
 ```
 
-H20 应该返回 capability 接近 `(9, 0)`。重新编译本地扩展时使用：
+如果是 `torch==1.13.1+cu117`，并且 `get_arch_list()` 只到 `sm_86`，不要继续在
+这个环境上修 PointNet2；PyTorch 自己的 CUDA kernel 也跑不了 H20。切换到：
 
 ```bash
-CUDA_HOME=/usr/local/cuda-12.8 TORCH_CUDA_ARCH_LIST="9.0+PTX"
+CUDA_HOME=/usr/local/cuda-12.8 \
+TORCH_CUDA_ARCH_LIST="9.0+PTX" \
+POINTNET2_SKIP_CUDA_VERSION_CHECK=1 \
+bash scripts/setup_uv_policy_h20.sh
+```
+
+如果已经是 `torch==2.4.1` 且 `get_arch_list()` 包含 `sm_90`，但 PointNet2 仍报
+`no kernel image is available`，说明加载到的是旧 PointNet2 `.so` 或扩展没按
+`9.0+PTX` 重编，直接强制重装 H20 policy 环境：
+
+```bash
+FORCE_REINSTALL=1 \
+CUDA_HOME=/usr/local/cuda-12.8 \
+TORCH_CUDA_ARCH_LIST="9.0+PTX" \
+POINTNET2_SKIP_CUDA_VERSION_CHECK=1 \
+bash scripts/setup_uv_policy_h20.sh
 ```
 
 ### `pointnet2_ops` 编译失败：`Unknown CUDA arch (9.0+PTX) or GPU not supported`
 
 `torch==1.13.1+cu117` 的 `_get_cuda_arch_flags` 只认到 `sm_86`（Ampere），不认
-`9.0`（Hopper）。`setup_pointnet2_policy.sh` 已内置了自动 patch 逻辑：检测到
-`TORCH_CUDA_ARCH_LIST` 含 `9.0` 时会先 patch `torch/utils/cpp_extension.py`，
-加入 `'9.0'` 支持。如果自动 patch 失败，会自动降级为 `8.6+PTX`（PTX 向前兼容，
-H20 驱动可以 JIT 编译到 `sm_90`）。
+`9.0`（Hopper）。旧的 `setup_pointnet2_policy.sh` 可以 patch 这个检查并让
+PointNet2 编译，但它不能解决 `torch==1.13.1+cu117` 本身不支持 H20 的问题。
+H20 policy 直接使用 `setup_uv_policy_h20.sh`。
 
 重新编译：
 
 ```bash
 cd "$PROJECT_ROOT"
-source scripts/activate_uv_policy.sh
 CUDA_HOME="$CUDA128_HOME" \
 TORCH_CUDA_ARCH_LIST="9.0+PTX" \
 POINTNET2_SKIP_CUDA_VERSION_CHECK=1 \
-bash scripts/setup_pointnet2_policy.sh
+bash scripts/setup_uv_policy_h20.sh
 ```
 
-如果仍然失败，可以退而使用 `8.6+PTX`（对 PointNet2 这类基础 kernel 性能差异可忽略）：
+如果仍然失败，可以临时退到 `8.6+PTX` 生成 PTX fallback，但仍然要在 H20 policy
+环境里重编：
 
 ```bash
 CUDA_HOME="$CUDA128_HOME" \
 TORCH_CUDA_ARCH_LIST="8.6+PTX" \
 POINTNET2_SKIP_CUDA_VERSION_CHECK=1 \
-bash scripts/setup_pointnet2_policy.sh
+bash scripts/setup_uv_policy_h20.sh
 ```
 
 ### Isaac Gym 下载或解压失败
@@ -524,14 +563,11 @@ except ImportError:
 CUDA_HOME=/usr/local/cuda-12.8 \
 TORCH_CUDA_ARCH_LIST="9.0+PTX" \
 POINTNET2_SKIP_CUDA_VERSION_CHECK=1 \
-bash scripts/setup_pointnet2_policy.sh
+bash scripts/setup_uv_policy_h20.sh
 ```
 
-如果仍失败，保存完整报错。下一步通常是二选一：
-
-- 安装 CUDA 11.8 toolkit 后重新编译 PointNet2。
-- 升级 policy PyTorch 到支持 CUDA 12.x / H20 更好的版本，但这会增加 Isaac Gym
-  兼容性风险。
+如果仍失败，保存完整报错。下一步通常是检查 `gcc/g++`、`nvcc`、`torch.version.cuda`
+和 PointNet2 编译日志，而不是退回 `torch==1.13.1+cu117`。
 
 ## 8. 最短命令清单
 
@@ -583,17 +619,16 @@ python ./network/train.py --config-name ipdf_config --exp-dir ./h20_ipdf_smoke \
 
 ## 9. 仍需人工决策的点
 
-如果目标只是最快跑通已有 policy 代码，先按本文保守路线走：
+如果目标只是最快跑通已有 policy 代码，先按本文 H20 路线走：
 
 - Python 3.8
-- policy: `torch==1.13.1+cu117`
+- policy: `torch==2.4.1` from cu124 wheels
 - Isaac Gym Preview 4
-- CUDA 12.8 toolkit 编译 PointNet2，跳过 PyTorch CUDA 版本严格检查
+- CUDA 12.8 toolkit 编译 PointNet2
 - `TORCH_CUDA_ARCH_LIST=9.0+PTX`
 
 如果目标是长期在 H20 上大规模训练，建议后续专门开一轮环境升级：
 
-- 尝试 PyTorch 2.x + CUDA 12.x。
-- 验证 Isaac Gym Preview 4 是否还能稳定。
+- 验证更高版本 PyTorch + CUDA 12.x 是否还能稳定跑 Isaac Gym Preview 4。
 - 重编 PointNet2、PyTorch3D、CSDF。
-- 固化新的 `setup_h20_*.sh` 脚本，避免每次靠手工环境变量。
+- 固化新的 smoke test 和多卡训练入口，避免每次靠手工环境变量。

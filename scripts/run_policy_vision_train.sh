@@ -9,8 +9,9 @@ EPISODE_LENGTH="${EPISODE_LENGTH:-250}"
 MAX_ITERATIONS="${MAX_ITERATIONS:-10000}"
 LOGDIR="${LOGDIR:-logs/vision_train}"
 BACKBONE_TYPE="${BACKBONE_TYPE:-pn}"
+POLICY_ACTIVATE_SCRIPT="${POLICY_ACTIVATE_SCRIPT:-$ROOT_DIR/scripts/activate_uv_policy.sh}"
 
-source "$ROOT_DIR/scripts/activate_uv_policy.sh"
+source "$POLICY_ACTIVATE_SCRIPT"
 cd "$ROOT_DIR/dexgrasp_policy/dexgrasp"
 
 CUDA_VISIBLE_DEVICES="$GPU_ID" python train.py \

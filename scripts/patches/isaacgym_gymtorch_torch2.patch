@@ -1,0 +1,119 @@
+--- gymtorch.cpp
++++ gymtorch.cpp
+@@ -70,44 +70,77 @@
+ 
+     torch::DeviceType deviceType;
+     torch::DeviceIndex deviceIndex;
++#if TORCH_MAJOR >= 2
++    torch::ScalarType scalarType;
++    size_t itemSize;
++#else
+     TheTensorTypeId_ tensorType;
++#endif
+     if (dev < 0)
+     {
+         // CPU tensor
+         deviceType = torch::DeviceType::CPU;
+         deviceIndex = -1;
++#if TORCH_MAJOR < 2
+         tensorType = TheTensorTypeId_::CPUTensorId;
++#endif
+     }
+     else
+     {
+         // GPU tensor
+         deviceType = torch::DeviceType::CUDA;
+         deviceIndex = dev;
++#if TORCH_MAJOR < 2
+         tensorType = TheTensorTypeId_::CUDATensorId;
++#endif
+     }
+ 
++#if TORCH_MAJOR >= 2
++    torch::Device device = dev < 0 ? torch::Device(torch::kCPU) : torch::Device(torch::kCUDA, dev);
++#else
+     torch::Device device(deviceType, deviceIndex);
++#endif
+     torch::DataPtr dataPtr(data, device);
+     caffe2::TypeMeta typeMeta;
+     switch (dtype)
+     {
+     case eGymDataTypeFp32:
++#if TORCH_MAJOR >= 2
++        scalarType = torch::kFloat32;
++        itemSize = sizeof(float);
++#endif
+         typeMeta = caffe2::TypeMeta::Make<float>();
+         break;
+     case eGymDataTypeUint8:
++#if TORCH_MAJOR >= 2
++        scalarType = torch::kUInt8;
++        itemSize = sizeof(uint8_t);
++#endif
+         typeMeta = caffe2::TypeMeta::Make<uint8_t>();
+         break;
+     case eGymDataTypeInt16:
++#if TORCH_MAJOR >= 2
++        scalarType = torch::kInt16;
++        itemSize = sizeof(int16_t);
++#endif
+         typeMeta = caffe2::TypeMeta::Make<int16_t>();
+         break;
+     case eGymDataTypeUint32:
+         // linker error with uint32_t (not supported as torch dtype)
+         // typeMeta = caffe2::TypeMeta::Make<uint32_t>();
++#if TORCH_MAJOR >= 2
++        scalarType = torch::kInt32;
++        itemSize = sizeof(int32_t);
++#endif
+         typeMeta = caffe2::TypeMeta::Make<int32_t>();
+         break;
+     case eGymDataTypeUint64:
+         // linker error with uint64_t (not supported as torch dtype)
+         // typeMeta = caffe2::TypeMeta::Make<uint64_t>();
++#if TORCH_MAJOR >= 2
++        scalarType = torch::kInt64;
++        itemSize = sizeof(int64_t);
++#endif
+         typeMeta = caffe2::TypeMeta::Make<int64_t>();
+         break;
+ 
+@@ -117,6 +150,30 @@
+         return torch::autograd::make_variable(torch::Tensor(), false);
+     }
+ 
++#if TORCH_MAJOR >= 2
++    torch::TensorOptions options = torch::TensorOptions().dtype(scalarType).device(device);
++    if (isContiguous)
++    {
++        return torch::from_blob(data, torch::IntArrayRef(dimensions), options);
++    }
++
++    // Wrap a non-owning view. Isaac Gym owns the backing memory.
++    std::vector<int64_t> strides(ndims);
++    strides[ndims - 1] = 1;
++    for (int i = ndims - 2; i >= 0; i--)
++    {
++        strides[i] = strides[i + 1] * dimensions[i + 1];
++    }
++
++    int64_t storageOffset = 0;
++    for (int i = 0; i < ndims; i++)
++    {
++        storageOffset += offsets[i] * strides[i];
++    }
++
++    void* viewData = static_cast<void*>(static_cast<char*>(data) + storageOffset * itemSize);
++    return torch::from_blob(viewData, torch::IntArrayRef(counts), torch::IntArrayRef(strides), options);
++#else
+ #if (TORCH_MAJOR == 1 && TORCH_MINOR >= 6) || TORCH_MAJOR > 1
+     torch::Storage storage(
+         torch::Storage::use_byte_size_t(), numElem * typeMeta.itemsize(), std::move(dataPtr), nullptr, false);
+@@ -155,6 +212,7 @@
+     torch::Tensor tensor(tensorImpl);
+ 
+     return torch::autograd::make_variable(tensor, false);
++#endif
+ }
+ 
+ 

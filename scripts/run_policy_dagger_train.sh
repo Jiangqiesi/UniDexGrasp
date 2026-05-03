@@ -10,8 +10,9 @@ MAX_ITERATIONS="${MAX_ITERATIONS:-10000}"
 LOGDIR="${LOGDIR:-logs/dagger_train}"
 BACKBONE_TYPE="${BACKBONE_TYPE:-pn}"
 EXPERT_MODEL="${EXPERT_MODEL:-$ROOT_DIR/dexgrasp_policy/example_model/model.pt}"
+POLICY_ACTIVATE_SCRIPT="${POLICY_ACTIVATE_SCRIPT:-$ROOT_DIR/scripts/activate_uv_policy.sh}"
 
-source "$ROOT_DIR/scripts/activate_uv_policy.sh"
+source "$POLICY_ACTIVATE_SCRIPT"
 cd "$ROOT_DIR/dexgrasp_policy/dexgrasp"
 
 CUDA_VISIBLE_DEVICES="$GPU_ID" python train.py \

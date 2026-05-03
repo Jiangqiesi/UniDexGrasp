@@ -4,8 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 GPU_ID="${GPU_ID:-0}"
 SEED="${SEED:-0}"
+POLICY_ACTIVATE_SCRIPT="${POLICY_ACTIVATE_SCRIPT:-$ROOT_DIR/scripts/activate_uv_policy.sh}"
 
-source "$ROOT_DIR/scripts/activate_uv_policy.sh"
+source "$POLICY_ACTIVATE_SCRIPT"
 cd "$ROOT_DIR/dexgrasp_policy/dexgrasp"
 
 CUDA_VISIBLE_DEVICES="$GPU_ID" python train.py \
