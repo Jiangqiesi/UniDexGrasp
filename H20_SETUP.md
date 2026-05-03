@@ -68,12 +68,12 @@ dnf install -y \
   gcc gcc-c++ make git git-lfs curl rsync tmux htop unzip \
   cmake ninja-build pkgconf-pkg-config \
   mesa-libGL glib2 libXrender libXext libXi libXrandr libXcursor \
-  libglvnd libglvnd-egl vulkan-loader || \
+  libglvnd libglvnd-egl vulkan-loader vulkan-tools || \
 yum install -y \
   gcc gcc-c++ make git git-lfs curl rsync tmux htop unzip \
   cmake ninja-build pkgconf-pkg-config \
   mesa-libGL glib2 libXrender libXext libXi libXrandr libXcursor \
-  libglvnd libglvnd-egl vulkan-loader
+  libglvnd libglvnd-egl vulkan-loader vulkan-tools
 
 git lfs install
 ```
@@ -376,6 +376,10 @@ bash scripts/setup_uv_policy_h20.sh
 - `setup_uv_policy_h20.sh` — 复用 `.venvs/unidexgrasp-policy-h20`
 - 安装 `torch==2.4.1` / `torchvision==0.19.1` / `torchaudio==2.4.1`
   from cu124 wheels
+- 如果复用已有 `.venvs/unidexgrasp-policy-h20`，日志里可能显示
+  `torch==2.4.1+cu121`。脚本会接受任何 `torch==2.4.1`、`torch.version.cuda`
+  为 `12.x`、且 `torch.cuda.get_arch_list()` 包含 `sm_90` 的环境；如果想强制
+  换成 cu124 wheel，用 `FORCE_REINSTALL=1` 重跑 setup。
 - 安装 Isaac Gym Preview 4
 - Isaac Gym 的 `gymtorch.cpp` 已加 PyTorch 2.x 兼容分支，用 `torch::from_blob`
   包装 Gym tensor
@@ -438,6 +442,35 @@ POLICY_ACTIVATE_SCRIPT="$PWD/scripts/activate_uv_policy_h20.sh" \
 GPU_ID=0 \
 bash scripts/run_policy_vision_smoke.sh
 ```
+
+这两个 smoke 覆盖的东西不一样：
+
+- `run_policy_state_smoke.sh` 不启用相机；在 `--headless` 下会把
+  `graphics_device_id` 设成 `-1`，主要验证 PyTorch、PointNet2、Isaac Gym
+  GPU PhysX / GPU pipeline。
+- `run_policy_vision_smoke.sh` 会创建 Isaac Gym camera sensors，必须能通过
+  Vulkan 创建 NVIDIA graphics device。即使没有窗口、没有 `DISPLAY`，它也需要
+  服务器的 NVIDIA Vulkan ICD / graphics driver layer 正常。
+
+先在服务器上做一次 Vulkan 预检：
+
+```bash
+cd "$PROJECT_ROOT"
+bash scripts/check_policy_vulkan.sh
+```
+
+如果 `tmp.log` 里类似下面这样：
+
+```text
+No GPU devices found.
+[Error] [carb.gym.plugin] Failed to create Nvf device in createNvfGraphics.
+*** Failed to create sim
+```
+
+说明 H20 policy Python 环境基本已经走到 Isaac Gym 建 sim 这一步了；当前失败点是
+系统 Vulkan / graphics 层没有暴露 NVIDIA 设备，不是 `torch==2.4.1`、
+PointNet2 或 CUDA arch 的问题。先修 `check_policy_vulkan.sh` 报出的系统项，再
+重跑 vision smoke。
 
 如果 smoke test 通过，再考虑多卡训练。当前脚本默认是单进程单卡，
 8 张 H20 不是自动并行；需要你自己按实验拆 `GPU_ID` 或改训练脚本。
@@ -506,6 +539,36 @@ CUDA_HOME="$CUDA128_HOME" \
 TORCH_CUDA_ARCH_LIST="8.6+PTX" \
 POINTNET2_SKIP_CUDA_VERSION_CHECK=1 \
 bash scripts/setup_uv_policy_h20.sh
+```
+
+### policy vision smoke：`Failed to create Nvf device`
+
+这是 Isaac Gym camera rendering 的 Vulkan graphics device 创建失败。常见原因是：
+
+- 只装了 CUDA / compute driver，没装 NVIDIA Vulkan ICD / graphics driver libs。
+- 机器在容器里运行，但容器没有 `graphics` driver capability，例如缺少
+  `NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics` 或 `all`。
+- `/usr/share/vulkan/icd.d/` 或 `/etc/vulkan/icd.d/` 没有 NVIDIA ICD JSON，或
+  JSON 指向的 NVIDIA Vulkan library 不存在。
+- `vulkaninfo --summary` 看不到 NVIDIA H20。
+
+先跑：
+
+```bash
+bash scripts/check_policy_vulkan.sh
+```
+
+期望能看到 NVIDIA ICD JSON，并且 `vulkaninfo --summary` 中列出 NVIDIA GPU。
+如果 `vulkaninfo` 命令不存在，先安装 `vulkan-tools`。如果 `vulkaninfo` 存在但
+看不到 NVIDIA 设备，需要让管理员补齐 NVIDIA driver 的 Vulkan / graphics 组件；
+`nvidia-smi` 正常只说明 compute/management 层正常，不等于 Isaac Gym 相机渲染可用。
+
+临时只验证 policy 非视觉链路，可以先跑：
+
+```bash
+POLICY_ACTIVATE_SCRIPT="$PWD/scripts/activate_uv_policy_h20.sh" \
+GPU_ID=0 \
+bash scripts/run_policy_state_smoke.sh
 ```
 
 ### PointNet2 编译失败：`Unsupported gpu architecture 'compute_37'`
