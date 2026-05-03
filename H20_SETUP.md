@@ -380,6 +380,7 @@ bash scripts/setup_uv_policy_h20.sh
 - Isaac Gym 的 `gymtorch.cpp` 已加 PyTorch 2.x 兼容分支，用 `torch::from_blob`
   包装 Gym tensor
 - 在 `dexgrasp_policy/thirdparty/Pointnet2_PyTorch_h20` 中重编 PointNet2
+- PointNet2 的 JIT fallback 已 patch：不再覆盖 `TORCH_CUDA_ARCH_LIST=9.0+PTX`
 
 如果需要强制重建某个环境，设置 `FORCE_REINSTALL=1` 前缀执行对应脚本。
 
@@ -502,6 +503,27 @@ bash scripts/setup_uv_policy_h20.sh
 ```bash
 CUDA_HOME="$CUDA128_HOME" \
 TORCH_CUDA_ARCH_LIST="8.6+PTX" \
+POINTNET2_SKIP_CUDA_VERSION_CHECK=1 \
+bash scripts/setup_uv_policy_h20.sh
+```
+
+### PointNet2 编译失败：`Unsupported gpu architecture 'compute_37'`
+
+这是 PointNet2 旧版 `pointnet2_utils.py` 的 JIT fallback 硬编码了老架构：
+
+```text
+TORCH_CUDA_ARCH_LIST=3.7+PTX;5.0;6.0;6.1;6.2;7.0;7.5
+nvcc fatal   : Unsupported gpu architecture 'compute_37'
+```
+
+CUDA 12.8 已经不支持 `compute_37`。`setup_uv_policy_h20.sh` 会自动 patch
+`Pointnet2_PyTorch_h20/pointnet2_ops_lib/pointnet2_ops/pointnet2_utils.py`，让它
+只在环境变量未设置时才默认使用 `9.0+PTX`。如果你已经有旧的
+`Pointnet2_PyTorch_h20` 目录，直接重跑脚本即可：
+
+```bash
+CUDA_HOME="$CUDA128_HOME" \
+TORCH_CUDA_ARCH_LIST="9.0+PTX" \
 POINTNET2_SKIP_CUDA_VERSION_CHECK=1 \
 bash scripts/setup_uv_policy_h20.sh
 ```

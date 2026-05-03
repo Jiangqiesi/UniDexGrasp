@@ -15,6 +15,7 @@ ISAACGYM_PACKAGE_DIR="$ISAACGYM_EXTRACT_DIR/isaacgym"
 DEFAULT_ISAACGYM_PATH="$ROOT_DIR/dexgrasp_policy/thirdparty/isaacgym_preview4/isaacgym"
 ISAACGYM_PATH="${ISAACGYM_PATH:-$DEFAULT_ISAACGYM_PATH}"
 GYMTORCH_TORCH2_PATCH="$ROOT_DIR/scripts/patches/isaacgym_gymtorch_torch2.patch"
+POINTNET2_H20_ARCH_PATCH="$ROOT_DIR/scripts/patches/pointnet2_h20_arch.patch"
 LEGACY_POINTNET2_DIR="$ROOT_DIR/dexgrasp_policy/thirdparty/Pointnet2_PyTorch"
 POINTNET2_DIR="${POINTNET2_H20_DIR:-$ROOT_DIR/dexgrasp_policy/thirdparty/Pointnet2_PyTorch_h20}"
 FORCE_REINSTALL="${FORCE_REINSTALL:-0}"
@@ -110,6 +111,24 @@ patch_gymtorch_torch2() {
   patch -d "$(dirname "$gymtorch_cpp")" -p0 < "$GYMTORCH_TORCH2_PATCH"
 }
 
+patch_pointnet2_h20_arch() {
+  local pointnet2_utils="$POINTNET2_DIR/pointnet2_ops_lib/pointnet2_ops/pointnet2_utils.py"
+  if [[ ! -f "$pointnet2_utils" ]]; then
+    echo "WARNING: cannot find PointNet2 pointnet2_utils.py at '$pointnet2_utils'." >&2
+    return 0
+  fi
+  if grep -q 'os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "9.0+PTX")' "$pointnet2_utils"; then
+    echo "PointNet2 JIT arch fallback already patched for H20."
+    return 0
+  fi
+  if ! command -v patch >/dev/null 2>&1; then
+    echo "Missing 'patch' command; install patch/diffutils before setting up H20 policy." >&2
+    exit 1
+  fi
+  echo "Patching PointNet2 JIT arch fallback for H20 ..."
+  patch -d "$(dirname "$pointnet2_utils")" -p0 < "$POINTNET2_H20_ARCH_PATCH"
+}
+
 "${UV_PIP[@]}" -U pip wheel ninja packaging
 "${UV_PIP[@]}" "setuptools<70"
 
@@ -182,6 +201,7 @@ if [[ ! -d "$POINTNET2_DIR/.git" ]]; then
     git clone https://github.com/erikwijmans/Pointnet2_PyTorch.git "$POINTNET2_DIR"
   fi
 fi
+patch_pointnet2_h20_arch
 
 cat <<EOF
 Building H20 PointNet2 with:
