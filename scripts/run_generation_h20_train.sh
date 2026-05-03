@@ -18,6 +18,7 @@ if [[ "${SKIP_GENERATION_DATA_CHECK:-0}" != "1" ]]; then
   python - "$CONFIG_NAME" "./$EXP_DIR" "$@" <<'PY'
 import glob
 import json
+import numpy as np
 import os
 import sys
 
@@ -50,7 +51,8 @@ else:
     split_paths = [os.path.join(split_dir, f"{category}.json") for category in categories]
 
 missing = []
-checked_instances = 0
+invalid = []
+instances = set()
 for split_path in split_paths:
     if not os.path.exists(split_path):
         missing.append(split_path)
@@ -62,34 +64,71 @@ for split_path in split_paths:
 
     for mode in ("train", "test"):
         for instance in split_data.get(mode, []):
-            checked_instances += 1
-            instance_mesh_dir = os.path.join(mesh_data_dir, category, instance)
-            instance_pose_dir = os.path.join(pose_data_dir, category, instance)
+            instances.add((category, instance))
 
-            for filename in ("poses.npy", "pcs_table.npy"):
-                path = os.path.join(instance_mesh_dir, filename)
-                if not os.path.exists(path):
-                    missing.append(path)
+for category, instance in sorted(instances):
+    instance_mesh_dir = os.path.join(mesh_data_dir, category, instance)
+    instance_pose_dir = os.path.join(pose_data_dir, category, instance)
+    pose_path = os.path.join(instance_mesh_dir, "poses.npy")
+    pcs_path = os.path.join(instance_mesh_dir, "pcs_table.npy")
 
-            if not os.path.isdir(instance_pose_dir):
-                missing.append(instance_pose_dir)
-            elif not any(name.endswith(".npz") for name in os.listdir(instance_pose_dir)):
-                missing.append(os.path.join(instance_pose_dir, "*.npz"))
+    if not os.path.isdir(instance_pose_dir):
+        missing.append(instance_pose_dir)
+    elif not any(name.endswith(".npz") for name in os.listdir(instance_pose_dir)):
+        missing.append(os.path.join(instance_pose_dir, "*.npz"))
 
-if missing:
-    preview = "\n  ".join(missing[:20])
-    extra = "" if len(missing) <= 20 else f"\n  ... and {len(missing) - 20} more"
+    pose_matrices = None
+    if not os.path.exists(pose_path):
+        missing.append(pose_path)
+    else:
+        try:
+            pose_matrices = np.load(pose_path, mmap_mode="r", allow_pickle=False)
+            if pose_matrices.ndim != 3 or pose_matrices.shape[1:] != (4, 4):
+                invalid.append(f"{pose_path}: expected shape (N, 4, 4), got {pose_matrices.shape}")
+        except Exception as exc:
+            invalid.append(f"{pose_path}: {type(exc).__name__}: {exc}")
+
+    if not os.path.exists(pcs_path):
+        missing.append(pcs_path)
+    else:
+        try:
+            pcs_table = np.load(pcs_path, mmap_mode="r", allow_pickle=False)
+            if pcs_table.ndim != 3 or pcs_table.shape[-1] != 3:
+                invalid.append(f"{pcs_path}: expected shape (N, P, 3), got {pcs_table.shape}")
+            elif pcs_table.shape[1] < 3000:
+                invalid.append(f"{pcs_path}: expected at least 3000 object points, got {pcs_table.shape}")
+            elif pose_matrices is not None and pose_matrices.ndim == 3 and pcs_table.shape[0] != pose_matrices.shape[0]:
+                invalid.append(
+                    f"{pcs_path}: pose count mismatch, pcs_table has {pcs_table.shape[0]} "
+                    f"but poses.npy has {pose_matrices.shape[0]}"
+                )
+            else:
+                _ = pcs_table[-1, -1, -1]
+        except Exception as exc:
+            invalid.append(f"{pcs_path}: {type(exc).__name__}: {exc}")
+
+if missing or invalid:
+    sections = []
+    if missing:
+        preview = "\n  ".join(missing[:20])
+        extra = "" if len(missing) <= 20 else f"\n  ... and {len(missing) - 20} more"
+        sections.append(f"missing files/directories:\n  {preview}{extra}")
+    if invalid:
+        preview = "\n  ".join(invalid[:20])
+        extra = "" if len(invalid) <= 20 else f"\n  ... and {len(invalid) - 20} more"
+        sections.append(f"invalid numpy caches:\n  {preview}{extra}")
     raise SystemExit(
-        "Generation data preflight failed: missing files/directories:\n"
-        f"  {preview}{extra}\n\n"
-        "For the error in tmp.log, the missing cache is usually pcs_table.npy.\n"
+        "Generation data preflight failed:\n"
+        + "\n\n".join(sections)
+        + "\n\n"
+        "For the error in tmp.log, the bad cache is usually pcs_table.npy.\n"
         "Generate it on the H20 server, for example:\n"
         f"  cd {os.getcwd()}\n"
         f"  python scripts/generate_object_table_pc.py --data_root_path {mesh_data_dir} --gpu_list 4 5 6 7 --n_cpu 8\n\n"
         "Set SKIP_GENERATION_DATA_CHECK=1 only if you intentionally want to bypass this check."
     )
 
-print(f"Generation data preflight passed: {checked_instances} split instances checked.")
+print(f"Generation data preflight passed: {len(instances)} split instances checked.")
 PY
 fi
 

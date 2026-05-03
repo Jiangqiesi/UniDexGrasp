@@ -120,7 +120,10 @@ class DFCDataset(Dataset):
         file_path = self.file_list[item]  # e.g., "./data/DFCData/datasetv3.1/core/bottle-asdasfja12jaios9012/00000.npz"
         instance_no: str = file_path.split("/")[-2]
         category = file_path.split("/")[-3]  # e.g., core
-        recorded_data = np.load(file_path, allow_pickle=True)
+        try:
+            recorded_data = np.load(file_path, allow_pickle=True)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to load DFC pose file: {file_path}") from exc
 
         qpos_dict = recorded_data["qpos"].item()
         global_translation = np.array([qpos_dict['WRJTx'], qpos_dict['WRJTy'], qpos_dict['WRJTz']])  # [3]
@@ -133,8 +136,22 @@ class DFCDataset(Dataset):
         plane = recorded_data["plane"]
         obj_pc_path = pjoin(self.mesh_data_dir, category, instance_no, "pcs_table.npy")
         pose_path = pjoin(self.mesh_data_dir, category, instance_no, "poses.npy")
-        pcs_table = torch.tensor(np.load(obj_pc_path, allow_pickle=True), dtype=torch.float)
-        pose_matrices = torch.tensor(np.load(pose_path, allow_pickle=True), dtype=torch.float)
+        try:
+            pcs_table_np = np.load(obj_pc_path, allow_pickle=True)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to load object point cache: {obj_pc_path}. "
+                f"Source pose file: {file_path}"
+            ) from exc
+        try:
+            pose_matrices_np = np.load(pose_path, allow_pickle=True)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to load object pose cache: {pose_path}. "
+                f"Source pose file: {file_path}"
+            ) from exc
+        pcs_table = torch.tensor(pcs_table_np, dtype=torch.float)
+        pose_matrices = torch.tensor(pose_matrices_np, dtype=torch.float)
         index = (torch.tensor(plane[:3], dtype=torch.float) - pose_matrices[:, 2, :3]).norm(dim=1).argmin()
         pose_matrix = pose_matrices[index]
         pose_matrix[:2, 3] = 0

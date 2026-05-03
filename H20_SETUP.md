@@ -312,11 +312,16 @@ Hydra，所以这些临时覆盖项会生效。
 
 ```text
 FileNotFoundError: ... data/DFCData/meshdatav3/.../pcs_table.npy
+ValueError: cannot reshape array of size 61536 into shape (100,4000,3)
 ```
 
 `ipdf_data.yaml` 默认从 `data/DFCData/meshdatav3` 读取每个物体的
-`poses.npy` 和 `pcs_table.npy`。`run_generation_h20_train.sh` 现在会在启动
-`torchrun` 前做一次单进程预检；如果缺 `pcs_table.npy`，先在服务器上生成缓存：
+`poses.npy` 和 `pcs_table.npy`。`cannot reshape array ... into shape
+(100,4000,3)` 表示某个 `pcs_table.npy` 的 header 还在，但文件内容只写了一小段，
+通常是生成缓存时进程被中断留下的半文件。`run_generation_h20_train.sh` 现在会在
+启动 `torchrun` 前做一次单进程预检，缺文件或坏 `.npy` 都会直接打印具体路径。
+
+如果缺很多 `pcs_table.npy`，先在服务器上生成缓存：
 
 ```bash
 cd "$PROJECT_ROOT/dexgrasp_generation"
@@ -325,6 +330,23 @@ python scripts/generate_object_table_pc.py \
   --data_root_path data/DFCData/meshdatav3 \
   --gpu_list 4 5 6 7 \
   --n_cpu 8
+```
+
+如果只是单个或少量 `pcs_table.npy` 损坏，先从预检报错路径里取出 object code。
+例如路径是：
+
+```text
+data/DFCData/meshdatav3/core/abc123/pcs_table.npy
+```
+
+则 object code 是 `core/abc123`，只重生成这个对象即可：
+
+```bash
+python scripts/generate_object_table_pc.py \
+  --data_root_path data/DFCData/meshdatav3 \
+  --object_code core/abc123 \
+  --gpu_list 4 \
+  --n_cpu 1
 ```
 
 如果只是临时确认训练代码、想跳过预检，可以设置

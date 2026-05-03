@@ -158,7 +158,14 @@ def sample_projected(_):
 
     pcs = np.stack(pcs)
 
-    np.save(os.path.join(args.data_root_path, object_code, 'pcs_table.npy'), pcs)
+    output_path = os.path.join(args.data_root_path, object_code, 'pcs_table.npy')
+    tmp_output_path = f'{output_path}.tmp.{os.getpid()}.npy'
+    try:
+        np.save(tmp_output_path, pcs)
+        os.replace(tmp_output_path, output_path)
+    finally:
+        if os.path.exists(tmp_output_path):
+            os.remove(tmp_output_path)
 
 
 if __name__ == '__main__':
@@ -172,6 +179,8 @@ if __name__ == '__main__':
     parser.add_argument('--max_n_points_table', type=int, default=3000)
     parser.add_argument('--num_samples_table', type=int, default=1000)
     parser.add_argument('--n_cpu', type=int, default=8)
+    parser.add_argument('--object_code', type=str, nargs='*', default=None,
+                        help='Optional object code(s) relative to data_root_path, e.g. core/xxxx.')
     # parser.add_argument('--n_cameras', type=int, default=6)
     # parser.add_argument('--theta', type=float, default=np.pi / 4)
     parser.add_argument('--scale', type=float, default=0.1)
@@ -185,10 +194,13 @@ if __name__ == '__main__':
     parser.add_argument('--far', type=float, default=100)
     args = parser.parse_args()
 
-    object_category_list = os.listdir(args.data_root_path)
-    object_code_list = []
-    for object_category in object_category_list:
-        object_code_list += [os.path.join(object_category, object_code) for object_code in sorted(os.listdir(os.path.join(args.data_root_path, object_category)))]
+    if args.object_code:
+        object_code_list = args.object_code
+    else:
+        object_category_list = os.listdir(args.data_root_path)
+        object_code_list = []
+        for object_category in object_category_list:
+            object_code_list += [os.path.join(object_category, object_code) for object_code in sorted(os.listdir(os.path.join(args.data_root_path, object_category)))]
     # object_code_list = [object_code for object_code in object_code_list if not os.path.exists(os.path.join(args.data_root_path, object_code, 'pcs.npy'))]
 
     # object_code_list = object_code_list[:1]
