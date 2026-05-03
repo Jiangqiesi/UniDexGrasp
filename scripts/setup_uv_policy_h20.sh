@@ -15,7 +15,6 @@ ISAACGYM_PACKAGE_DIR="$ISAACGYM_EXTRACT_DIR/isaacgym"
 DEFAULT_ISAACGYM_PATH="$ROOT_DIR/dexgrasp_policy/thirdparty/isaacgym_preview4/isaacgym"
 ISAACGYM_PATH="${ISAACGYM_PATH:-$DEFAULT_ISAACGYM_PATH}"
 GYMTORCH_TORCH2_PATCH="$ROOT_DIR/scripts/patches/isaacgym_gymtorch_torch2.patch"
-POINTNET2_H20_ARCH_PATCH="$ROOT_DIR/scripts/patches/pointnet2_h20_arch.patch"
 LEGACY_POINTNET2_DIR="$ROOT_DIR/dexgrasp_policy/thirdparty/Pointnet2_PyTorch"
 POINTNET2_DIR="${POINTNET2_H20_DIR:-$ROOT_DIR/dexgrasp_policy/thirdparty/Pointnet2_PyTorch_h20}"
 FORCE_REINSTALL="${FORCE_REINSTALL:-0}"
@@ -112,21 +111,56 @@ patch_gymtorch_torch2() {
 }
 
 patch_pointnet2_h20_arch() {
+  local setup_py="$POINTNET2_DIR/pointnet2_ops_lib/setup.py"
   local pointnet2_utils="$POINTNET2_DIR/pointnet2_ops_lib/pointnet2_ops/pointnet2_utils.py"
-  if [[ ! -f "$pointnet2_utils" ]]; then
-    echo "WARNING: cannot find PointNet2 pointnet2_utils.py at '$pointnet2_utils'." >&2
+  if [[ ! -f "$setup_py" || ! -f "$pointnet2_utils" ]]; then
+    echo "WARNING: cannot find PointNet2 setup.py or pointnet2_utils.py under '$POINTNET2_DIR'." >&2
     return 0
   fi
-  if grep -q 'os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "9.0+PTX")' "$pointnet2_utils"; then
-    echo "PointNet2 JIT arch fallback already patched for H20."
-    return 0
-  fi
-  if ! command -v patch >/dev/null 2>&1; then
-    echo "Missing 'patch' command; install patch/diffutils before setting up H20 policy." >&2
-    exit 1
-  fi
-  echo "Patching PointNet2 JIT arch fallback for H20 ..."
-  patch -d "$(dirname "$pointnet2_utils")" -p0 < "$POINTNET2_H20_ARCH_PATCH"
+  echo "Patching PointNet2 arch handling for H20 ..."
+  "${PYTHON[@]}" - "$setup_py" "$pointnet2_utils" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+setup_py = Path(sys.argv[1])
+pointnet2_utils = Path(sys.argv[2])
+
+setup_text = setup_py.read_text()
+if not re.search(r"^import os$", setup_text, flags=re.MULTILINE):
+    setup_text = setup_text.replace("import glob\n", "import glob\nimport os\n", 1)
+setup_text = re.sub(
+    r'os\.environ\["TORCH_CUDA_ARCH_LIST"\]\s*=\s*["\'][^"\']*["\']',
+    'os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "9.0+PTX")',
+    setup_text,
+)
+setup_text = re.sub(
+    r'os\.environ\.setdefault\("TORCH_CUDA_ARCH_LIST",\s*["\'][^"\']*["\']\)',
+    'os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "9.0+PTX")',
+    setup_text,
+)
+if "TORCH_CUDA_ARCH_LIST" not in setup_text:
+    marker = 'exec(open(osp.join("pointnet2_ops", "_version.py")).read())'
+    setup_text = setup_text.replace(
+        marker,
+        marker + '\n\nos.environ.setdefault("TORCH_CUDA_ARCH_LIST", "9.0+PTX")',
+        1,
+    )
+setup_py.write_text(setup_text)
+
+utils_text = pointnet2_utils.read_text()
+utils_text = re.sub(
+    r'os\.environ\["TORCH_CUDA_ARCH_LIST"\]\s*=\s*["\'][^"\']*["\']',
+    'os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "9.0+PTX")',
+    utils_text,
+)
+utils_text = re.sub(
+    r'os\.environ\.setdefault\("TORCH_CUDA_ARCH_LIST",\s*["\'][^"\']*["\']\)',
+    'os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "9.0+PTX")',
+    utils_text,
+)
+pointnet2_utils.write_text(utils_text)
+PY
 }
 
 "${UV_PIP[@]}" -U pip wheel ninja packaging
