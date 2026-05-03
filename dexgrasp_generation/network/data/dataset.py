@@ -27,7 +27,9 @@ def get_dex_dataloader(cfg, mode="train", shuffle=None):
             shuffle=shuffle,
         )
         shuffle = False
-    return DataLoader(dataset, batch_size=cfg["batch_size"], shuffle=shuffle, sampler=sampler, num_workers=cfg["num_workers"])
+    drop_last = mode == "train"
+    return DataLoader(dataset, batch_size=cfg["batch_size"], shuffle=shuffle, sampler=sampler,
+                      num_workers=cfg["num_workers"], drop_last=drop_last)
 
 def get_mesh_dataloader(cfg, mode="train"):
     dataset = Meshdata(cfg, mode)
